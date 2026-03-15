@@ -1,15 +1,15 @@
 /* eslint-disable react-native/no-inline-styles */
 
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Button, PermissionsAndroid } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
-import Geolocation from 'react-native-geolocation-service';
-import io from 'socket.io-client';
+import React, { useEffect, useState, useRef } from "react";
+import { View, Button, PermissionsAndroid, Platform } from "react-native";
+import MapView, { Marker } from "react-native-maps";
+import Geolocation from "react-native-geolocation-service";
+import io from "socket.io-client";
 
 export default function PassengerMap1() {
-
   const socketRef = useRef(null);
   const mapRef = useRef(null);
+  const watchId = useRef(null);
 
   const [driverLocation, setDriverLocation] = useState(null);
   const [passengerLocation, setPassengerLocation] = useState(null);
@@ -17,7 +17,7 @@ export default function PassengerMap1() {
   const requestRide = () => {
     if (!socketRef.current || !passengerLocation) return;
 
-    socketRef.current.emit('request-ride', {
+    socketRef.current.emit("request-ride", {
       passengerSocketId: socketRef.current.id,
       latitude: passengerLocation.latitude,
       longitude: passengerLocation.longitude,
@@ -25,113 +25,93 @@ export default function PassengerMap1() {
   };
 
   useEffect(() => {
-
     const init = async () => {
-
       try {
+        // Permission request
+        if (Platform.OS === "android") {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+          );
 
-        // Ask permission
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        );
-
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          console.log("Location permission denied");
-          return;
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            console.log("Location permission denied");
+            return;
+          }
         }
 
-        // Get passenger location
-        Geolocation.getCurrentPosition(
+        // Watch passenger live location
+        watchId.current = Geolocation.watchPosition(
           position => {
-
             if (!position?.coords) return;
 
             const { latitude, longitude } = position.coords;
 
             const location = {
               latitude,
-              longitude,
+              longitude
             };
 
             setPassengerLocation(location);
 
-            // move map to passenger
             if (mapRef.current) {
               mapRef.current.animateToRegion({
                 ...location,
                 latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
+                longitudeDelta: 0.01
               });
             }
-
           },
           error => {
-            console.log("GPS Error", error);
+            console.log("GPS ERROR:", error);
           },
           {
             enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 10000,
+            distanceFilter: 5,
+            interval: 5000,
+            fastestInterval: 2000
           }
         );
 
-        // SOCKET CONNECT
-        socketRef.current = io('https://socket-server-3kjo.onrender.com', {
-          transports: ['websocket'],
-          reconnection: true,
+        // SOCKET
+        socketRef.current = io("https://socket-server-3kjo.onrender.com", {
+          transports: ["websocket"]
         });
 
-        socketRef.current.on('connect', () => {
+        socketRef.current.on("connect", () => {
           console.log("Socket connected:", socketRef.current.id);
         });
 
-        // DRIVER LIVE LOCATION
-        socketRef.current.on('driver-location', data => {
-
+        socketRef.current.on("driver-location", data => {
           if (!data) return;
 
           const location = {
             latitude: Number(data.latitude),
-            longitude: Number(data.longitude),
+            longitude: Number(data.longitude)
           };
 
           setDriverLocation(location);
-
-          // move map to driver
-          if (mapRef.current) {
-            mapRef.current.animateToRegion({
-              ...location,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            });
-          }
-
         });
 
-        socketRef.current.on('ride-accepted', data => {
-          console.log("Ride Accepted:", data);
-        });
-
-      } catch (error) {
-        console.log("INIT ERROR:", error);
+      } catch (err) {
+        console.log("INIT ERROR:", err);
       }
-
     };
 
     init();
 
     return () => {
+      if (watchId.current) {
+        Geolocation.clearWatch(watchId.current);
+      }
+
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
     };
-
   }, []);
 
   return (
-  
     <View style={{ flex: 1 }}>
-
       <MapView
         ref={mapRef}
         style={{ flex: 1 }}
@@ -139,38 +119,27 @@ export default function PassengerMap1() {
           latitude: 13.0827,
           longitude: 80.2707,
           latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
+          longitudeDelta: 0.01
         }}
       >
-
         {passengerLocation && (
-          <Marker
-            coordinate={passengerLocation}
-            title="You"
-            pinColor="blue"
-          />
+          <Marker coordinate={passengerLocation} title="You" pinColor="blue" />
         )}
 
         {driverLocation && (
-          <Marker
-            coordinate={driverLocation}
-            title="Driver"
-            pinColor="green"
-          />
+          <Marker coordinate={driverLocation} title="Driver" pinColor="green" />
         )}
-
       </MapView>
 
       <View
         style={{
-          position: 'absolute',
+          position: "absolute",
           bottom: 40,
-          alignSelf: 'center',
+          alignSelf: "center"
         }}
       >
         <Button title="Request Ride" onPress={requestRide} />
       </View>
-
     </View>
   );
 }
