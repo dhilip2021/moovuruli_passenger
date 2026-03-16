@@ -1,124 +1,176 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable react-native/no-inline-styles */
 
-import React, { useEffect, useState, useRef } from "react";
-import { View, Button, PermissionsAndroid, Platform, Text } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
-import Geolocation from "react-native-geolocation-service";
-import MapViewDirections from "react-native-maps-directions";
-import io from "socket.io-client";
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  Button,
+  PermissionsAndroid,
+  Platform,
+  Linking,
+  Image,
+  Alert,
+} from 'react-native';
 
-const GOOGLE_MAPS_APIKEY = "AIzaSyBo0Sm8o4iWEeXnjjTGDO2v6N8_7R3m2gI";
+import MapView, { Marker, AnimatedRegion } from 'react-native-maps';
+import Geolocation from 'react-native-geolocation-service';
+import MapViewDirections from 'react-native-maps-directions';
+import io from 'socket.io-client';
+
+const GOOGLE_KEY = 'AIzaSyBo0Sm8o4iWEeXnjjTGDO2v6N8_7R3m2gI';
+const SOCKET = 'https://socket-server-3kjo.onrender.com';
 
 export default function PassengerMap() {
-
   const socketRef = useRef(null);
   const mapRef = useRef(null);
   const watchId = useRef(null);
 
-  const [driverLocation, setDriverLocation] = useState(null);
   const [passengerLocation, setPassengerLocation] = useState(null);
   const [dropLocation, setDropLocation] = useState(null);
-
+  const [driverPhone, setDriverPhone] = useState(null);
+  const [driverReady, setDriverReady] = useState(false);
   const [distance, setDistance] = useState(null);
   const [duration, setDuration] = useState(null);
 
-  // request ride
-  const requestRide = () => {
-
-    if (!socketRef.current || !passengerLocation) return;
-
-    socketRef.current.emit("request-ride", {
-      passengerSocketId: socketRef.current.id,
-      latitude: passengerLocation.latitude,
-      longitude: passengerLocation.longitude
-    });
-
-  };
+  const driverLocation = useRef(
+    new AnimatedRegion({
+      latitude: 0,
+      longitude: 0,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    }),
+  ).current;
 
   useEffect(() => {
-
     const init = async () => {
-
-      // permission
-      if (Platform.OS === "android") {
-
+      if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         );
 
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          console.log("Location denied");
+          console.log('Location permission denied');
           return;
         }
       }
 
-      // watch passenger location
-      watchId.current = Geolocation.watchPosition(
+      // CURRENT LOCATION (APP OPEN)
+      Geolocation.getCurrentPosition(
         position => {
-
-          const { latitude, longitude } = position.coords;
+          const latitude = position.coords.latitude;
+          const longitude = position.coords.longitude;
 
           const location = { latitude, longitude };
 
           setPassengerLocation(location);
 
           if (mapRef.current) {
-
-            mapRef.current.animateCamera({
-              center: location
-            });
-
+            mapRef.current.animateToRegion(
+              {
+                latitude,
+                longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              },
+              1000,
+            );
           }
+        },
+        error => console.log(error),
+        { enableHighAccuracy: true },
+      );
 
+      // PASSENGER LIVE LOCATION UPDATE
+      watchId.current = Geolocation.watchPosition(
+        position => {
+          const latitude = position.coords.latitude;
+          const longitude = position.coords.longitude;
+
+          const location = { latitude, longitude };
+
+          setPassengerLocation(location);
         },
         error => console.log(error),
         {
           enableHighAccuracy: true,
           distanceFilter: 5,
           interval: 3000,
-          fastestInterval: 2000
-        }
+        },
       );
 
-      // socket connect
-      socketRef.current = io("https://socket-server-3kjo.onrender.com", {
-        transports: ["websocket"]
+      // SOCKET CONNECT
+      socketRef.current = io(SOCKET, {
+        transports: ['websocket'],
       });
 
-      socketRef.current.on("connect", () => {
-        console.log("Socket:", socketRef.current.id);
+      // DRIVER LIVE LOCATION
+      socketRef.current.on('drivers-list', drivers => {
+        if (drivers && drivers.length > 0) {
+          const driver = drivers[0];
+
+          const latitude = Number(driver.latitude);
+          const longitude = Number(driver.longitude);
+
+          driverLocation
+            .timing({
+              latitude,
+              longitude,
+              duration: 1000,
+            })
+            .start();
+
+          setDriverReady(true); // driver available
+        }
       });
 
-      // driver location realtime
-      socketRef.current.on("driver-location", data => {
-
-        const location = {
-          latitude: Number(data.latitude),
-          longitude: Number(data.longitude)
-        };
-
-        setDriverLocation(location);
-
+      // DRIVER ACCEPT
+      socketRef.current.on('ride-accepted', data => {
+        setDriverPhone(data.phone);
       });
-
     };
-
 
     init();
 
     return () => {
+      if (watchId.current) {
+        Geolocation.clearWatch(watchId.current);
+      }
 
-      if (watchId.current) Geolocation.clearWatch(watchId.current);
-      if (socketRef.current) socketRef.current.disconnect();
-
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
-
   }, []);
 
+  // REQUEST RIDE
+  const requestRide = () => {
+    if (!passengerLocation) {
+      console.log('Passenger location not ready');
+      Alert.alert(
+        'Passenger location not ready',
+        [
+          {
+            text: 'Decline',
+            style: 'cancel',
+          },
+        ],
+        { cancelable: true },
+      );
+      return;
+    }
+
+    socketRef.current.emit('request-ride', {
+      passengerSocketId: socketRef.current.id,
+      latitude: passengerLocation.latitude,
+      longitude: passengerLocation.longitude,
+    });
+  };
+
+  const price = distance ? 40 + distance * 12 : 0;
+
   return (
-
     <View style={{ flex: 1 }}>
-
       <MapView
         ref={mapRef}
         style={{ flex: 1 }}
@@ -126,105 +178,99 @@ export default function PassengerMap() {
           latitude: 13.0827,
           longitude: 80.2707,
           latitudeDelta: 0.01,
-          longitudeDelta: 0.01
+          longitudeDelta: 0.01,
         }}
-        onPress={(e) => {
-
-          // user tap = drop location
-          setDropLocation(e.nativeEvent.coordinate);
-
-        }}
+        onPress={e => setDropLocation(e.nativeEvent.coordinate)}
       >
+        {/* PASSENGER */}
 
-        {/* passenger marker */}
         {passengerLocation && (
-          <Marker
-            coordinate={passengerLocation}
-            title="Pickup"
-            pinColor="blue"
-          />
+          <Marker coordinate={passengerLocation} pinColor="blue" />
         )}
 
-        {/* drop marker */}
-        {dropLocation && (
-          <Marker
-            coordinate={dropLocation}
-            title="Drop"
-            pinColor="red"
-          />
-        )}
+        {/* DROP LOCATION */}
 
-        {/* driver marker */}
-        {driverLocation && (
-          <Marker
+        {dropLocation && <Marker coordinate={dropLocation} pinColor="red" />}
+
+        {/* DRIVER CAR */}
+        {driverReady && (
+          <Marker.Animated
             coordinate={driverLocation}
-            title="Driver"
-            pinColor="green"
-          />
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <Image
+              source={require('../assets/images/autorickshaw.png')}
+              style={{
+                width: 40,
+                height: 40,
+              }}
+            />
+          </Marker.Animated>
         )}
 
-        {/* route line */}
+        {/* ROUTE */}
+
         {passengerLocation && dropLocation && (
           <MapViewDirections
             origin={passengerLocation}
             destination={dropLocation}
-            apikey={GOOGLE_MAPS_APIKEY}
+            apikey={GOOGLE_KEY}
             strokeWidth={5}
             strokeColor="black"
-            onReady={(result) => {
-
+            onReady={result => {
               setDistance(result.distance);
               setDuration(result.duration);
 
               mapRef.current.fitToCoordinates(result.coordinates, {
                 edgePadding: {
-                  right: 50,
-                  left: 50,
-                  top: 50,
-                  bottom: 50
-                }
+                  top: 80,
+                  right: 80,
+                  bottom: 80,
+                  left: 80,
+                },
               });
-
             }}
           />
         )}
-
       </MapView>
 
-      {/* ride button */}
+      {/* REQUEST BUTTON */}
+
       <View
         style={{
-          position: "absolute",
+          position: 'absolute',
           bottom: 40,
-          alignSelf: "center"
+          alignSelf: 'center',
         }}
       >
-
         <Button title="Request Ride" onPress={requestRide} />
-
       </View>
 
-      {/* ETA */}
-      {distance && duration && (
+      {/* TRIP INFO */}
+
+      {distance && (
         <View
           style={{
-            position: "absolute",
-            top: 50,
-            alignSelf: "center",
-            backgroundColor: "white",
-            padding: 10,
-            borderRadius: 10
+            position: 'absolute',
+            top: 60,
+            alignSelf: 'center',
+            backgroundColor: 'white',
+            padding: 12,
+            borderRadius: 10,
           }}
         >
-
           <Text>Distance: {distance.toFixed(2)} km</Text>
           <Text>ETA: {Math.ceil(duration)} mins</Text>
+          <Text>Fare: ₹{price.toFixed(0)}</Text>
 
+          {driverPhone && (
+            <Button
+              title="Call Driver"
+              onPress={() => Linking.openURL(`tel:${driverPhone}`)}
+            />
+          )}
         </View>
       )}
-
     </View>
-
   );
-
 }
