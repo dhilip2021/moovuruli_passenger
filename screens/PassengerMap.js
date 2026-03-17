@@ -29,18 +29,23 @@ export default function PassengerMap() {
   const [passengerLocation, setPassengerLocation] = useState(null);
   const [dropLocation, setDropLocation] = useState(null);
   const [driverPhone, setDriverPhone] = useState(null);
-  const [driverReady, setDriverReady] = useState(false);
   const [distance, setDistance] = useState(null);
   const [duration, setDuration] = useState(null);
+  const [drivers, setDrivers] = useState([]);
 
-  const driverLocation = useRef(
-    new AnimatedRegion({
-      latitude: 0,
-      longitude: 0,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01,
-    }),
-  ).current;
+  // 🔥 MULTI DRIVER MARKERS
+  const driverMarkers = useRef({});
+
+  // 🔥 REMOVE OFFLINE DRIVERS
+  useEffect(() => {
+    const currentIds = drivers.map(d => d.driverId);
+
+    Object.keys(driverMarkers.current).forEach(id => {
+      if (!currentIds.includes(id)) {
+        delete driverMarkers.current[id];
+      }
+    });
+  }, [drivers]);
 
   useEffect(() => {
     const init = async () => {
@@ -55,76 +60,70 @@ export default function PassengerMap() {
         }
       }
 
-      // CURRENT LOCATION (APP OPEN)
+      // 📍 CURRENT LOCATION
       Geolocation.getCurrentPosition(
         position => {
-          const latitude = position.coords.latitude;
-          const longitude = position.coords.longitude;
-
-          const location = { latitude, longitude };
+          const location = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
 
           setPassengerLocation(location);
 
-          if (mapRef.current) {
-            mapRef.current.animateToRegion(
-              {
-                latitude,
-                longitude,
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
-              },
-              1000,
-            );
-          }
+          mapRef.current?.animateToRegion(
+            { ...location, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+            1000,
+          );
         },
         error => console.log(error),
         { enableHighAccuracy: true },
       );
 
-      // PASSENGER LIVE LOCATION UPDATE
+      // 📡 LIVE LOCATION
       watchId.current = Geolocation.watchPosition(
         position => {
-          const latitude = position.coords.latitude;
-          const longitude = position.coords.longitude;
-
-          const location = { latitude, longitude };
-
-          setPassengerLocation(location);
+          setPassengerLocation({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
         },
         error => console.log(error),
-        {
-          enableHighAccuracy: true,
-          distanceFilter: 5,
-          interval: 3000,
-        },
+        { enableHighAccuracy: true, distanceFilter: 5, interval: 3000 },
       );
 
-      // SOCKET CONNECT
-      socketRef.current = io(SOCKET, {
-        transports: ['websocket'],
-      });
+      // 🔌 SOCKET CONNECT
+      socketRef.current = io(SOCKET, { transports: ['websocket'] });
 
-      // DRIVER LIVE LOCATION
-      socketRef.current.on('drivers-list', drivers => {
-        if (drivers && drivers.length > 0) {
-          const driver = drivers[0];
+      // 🚕 DRIVERS LIST (SINGLE CLEAN LISTENER)
+      socketRef.current.on('drivers-list', list => {
+        setDrivers(list);
 
+        list.forEach(driver => {
+          const id = driver.driverId;
           const latitude = Number(driver.latitude);
           const longitude = Number(driver.longitude);
 
-          driverLocation
-            .timing({
+          if (!driverMarkers.current[id]) {
+            // 🔥 CREATE MARKER FIRST TIME
+            driverMarkers.current[id] = new AnimatedRegion({
               latitude,
               longitude,
-              duration: 1000,
-            })
-            .start();
-
-          setDriverReady(true); // driver available
-        }
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
+            });
+          } else {
+            // 🔥 SMOOTH MOVE
+            driverMarkers.current[id].timing({
+              latitude,
+              longitude,
+              duration: 700,
+              useNativeDriver: false,
+            }).start();
+          }
+        });
       });
 
-      // DRIVER ACCEPT
+      // 📞 RIDE ACCEPTED
       socketRef.current.on('ride-accepted', data => {
         setDriverPhone(data.phone);
       });
@@ -133,30 +132,15 @@ export default function PassengerMap() {
     init();
 
     return () => {
-      if (watchId.current) {
-        Geolocation.clearWatch(watchId.current);
-      }
-
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+      if (watchId.current) Geolocation.clearWatch(watchId.current);
+      if (socketRef.current) socketRef.current.disconnect();
     };
   }, []);
 
-  // REQUEST RIDE
-  const requestRide = () => {
-    if (!passengerLocation) {
-      console.log('Passenger location not ready');
-      Alert.alert(
-        'Passenger location not ready',
-        [
-          {
-            text: 'Decline',
-            style: 'cancel',
-          },
-        ],
-        { cancelable: true },
-      );
+  // 🚕 REQUEST RIDE
+  const requestRide = driverId => {
+    if (!driverId || !passengerLocation) {
+      Alert.alert('Location not ready');
       return;
     }
 
@@ -164,6 +148,7 @@ export default function PassengerMap() {
       passengerSocketId: socketRef.current.id,
       latitude: passengerLocation.latitude,
       longitude: passengerLocation.longitude,
+      driverId,
     });
   };
 
@@ -182,34 +167,34 @@ export default function PassengerMap() {
         }}
         onPress={e => setDropLocation(e.nativeEvent.coordinate)}
       >
-        {/* PASSENGER */}
-
+        {/* 🧍 PASSENGER */}
         {passengerLocation && (
           <Marker coordinate={passengerLocation} pinColor="blue" />
         )}
 
-        {/* DROP LOCATION */}
-
+        {/* 📍 DROP */}
         {dropLocation && <Marker coordinate={dropLocation} pinColor="red" />}
 
-        {/* DRIVER CAR */}
-        {driverReady && (
-          <Marker.Animated
-            coordinate={driverLocation}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <Image
-              source={require('../assets/images/autorickshaw.png')}
-              style={{
-                width: 40,
-                height: 40,
-              }}
-            />
-          </Marker.Animated>
-        )}
+        {/* 🚕 ALL DRIVERS */}
+        {drivers.map(driver => {
+          const marker = driverMarkers.current[driver.driverId];
+          if (!marker) return null;
 
-        {/* ROUTE */}
+          return (
+            <Marker.Animated
+              key={driver.driverId}
+              coordinate={marker}
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <Image
+                source={require('../assets/images/autorickshaw.png')}
+                style={{ width: 40, height: 40 }}
+              />
+            </Marker.Animated>
+          );
+        })}
 
+        {/* 🛣️ ROUTE */}
         {passengerLocation && dropLocation && (
           <MapViewDirections
             origin={passengerLocation}
@@ -234,20 +219,28 @@ export default function PassengerMap() {
         )}
       </MapView>
 
-      {/* REQUEST BUTTON */}
-
+      {/* 🚕 DRIVER LIST BUTTON */}
       <View
         style={{
           position: 'absolute',
-          bottom: 40,
+          bottom: 100,
+          width: '90%',
           alignSelf: 'center',
+          backgroundColor: 'white',
+          padding: 10,
+          borderRadius: 10,
         }}
       >
-        <Button title="Request Ride" onPress={requestRide} />
+        {drivers.map(driver => (
+          <Button
+            key={driver.driverId}
+            title={`Request Driver: ${driver.driverId}`}
+            onPress={() => requestRide(driver.driverId)}
+          />
+        ))}
       </View>
 
-      {/* TRIP INFO */}
-
+      {/* 📊 TRIP INFO */}
       {distance && (
         <View
           style={{

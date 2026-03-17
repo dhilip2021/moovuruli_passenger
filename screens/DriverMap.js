@@ -1,115 +1,217 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable react-native/no-inline-styles */
 
-import React, { useEffect, useState, useRef } from "react";
-import { View, PermissionsAndroid, Platform, Image, Alert } from "react-native";
+import React, { useEffect, useState, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  View,
+  PermissionsAndroid,
+  Platform,
+  Image,
+  Alert,
+  Animated,
+} from 'react-native';
 
-import MapView, { Marker, AnimatedRegion } from "react-native-maps";
-import Geolocation from "react-native-geolocation-service";
-import io from "socket.io-client";
+import MapView, { Marker, AnimatedRegion } from 'react-native-maps';
+import Geolocation from 'react-native-geolocation-service';
+import io from 'socket.io-client';
 
-const SOCKET = "https://socket-server-3kjo.onrender.com";
+const SOCKET = 'https://socket-server-3kjo.onrender.com';
+
+const GOOGLE_KEY = 'AIzaSyBo0Sm8o4iWEeXnjjTGDO2v6N8_7R3m2gI';
+
+const snapToRoad = async (lat, lng) => {
+  try {
+    const url = `https://roads.googleapis.com/v1/snapToRoads?path=${lat},${lng}&key=${GOOGLE_KEY}`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (data.snappedPoints && data.snappedPoints.length > 0) {
+      const point = data.snappedPoints[0].location;
+
+      return {
+        latitude: point.latitude,
+        longitude: point.longitude,
+      };
+    }
+
+    return { latitude: lat, longitude: lng };
+  } catch (err) {
+    console.log('Snap error:', err);
+    return { latitude: lat, longitude: lng };
+  }
+};
 
 export default function DriverMap() {
   const socketRef = useRef(null);
   const watchId = useRef(null);
   const mapRef = useRef(null);
-
+  const [driverId, setDriverId] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
-  const [heading, setHeading] = useState(0);
 
-  // Generate driverId once
-  const driverId = useRef("driver_" + Math.floor(Math.random() * 10000)).current;
+  // 🔥 DRIVER ID
+  // const driverId = useRef(
+  //   'driver_' + Math.floor(Math.random() * 10000),
+  // ).current;
 
+  // 🔥 SMOOTH MARKER
   const driverLocation = useRef(
     new AnimatedRegion({
       latitude: 0,
       longitude: 0,
       latitudeDelta: 0.01,
       longitudeDelta: 0.01,
-    })
+    }),
   ).current;
 
-  // Initialize location + socket
+  // 🔥 ROTATION ANIMATION
+  const headingAnim = useRef(new Animated.Value(0)).current;
+
+  const rotate = headingAnim.interpolate({
+    inputRange: [0, 360],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  // 🔥 PREVIOUS LOCATION (FOR FILTER)
+  const prevLocation = useRef(null);
+
   useEffect(() => {
+    if (!driverId) return; // 🔥 WAIT
     const init = async () => {
-      if (Platform.OS === "android") {
+      if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         );
 
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          console.log("Location permission denied");
+          console.log('Location permission denied');
           return;
         }
       }
 
-      // CONNECT SOCKET
-      socketRef.current = io(SOCKET, { transports: ["websocket"] });
+      // SOCKET CONNECT
+      socketRef.current = io(SOCKET, {
+        transports: ['websocket'],
+      });
 
-      // GET CURRENT LOCATION
+      // INITIAL LOCATION
       Geolocation.getCurrentPosition(
-        (position) => {
+        position => {
           const latitude = position.coords.latitude;
           const longitude = position.coords.longitude;
 
           const location = { latitude, longitude };
+
           setCurrentLocation(location);
+          prevLocation.current = location;
 
-          driverLocation.timing({ latitude, longitude, duration: 500 }).start();
+          driverLocation
+            .timing({
+              latitude,
+              longitude,
+              duration: 500,
+              useNativeDriver: false,
+            })
+            .start();
 
-          // DRIVER ONLINE EVENT
-          socketRef.current.emit("driver-online", {
+          // DRIVER ONLINE
+          socketRef.current.emit('driver-online', {
             driverId,
             latitude,
             longitude,
-            phone: "9876543210",
+            phone: '9876543210',
           });
 
-          // AUTO ZOOM MAP
+          // MAP CENTER
           if (mapRef.current) {
             mapRef.current.animateToRegion(
-              { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
-              1000
+              {
+                latitude,
+                longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              },
+              1000,
             );
           }
         },
-        (error) => console.log(error),
-        { enableHighAccuracy: true }
+        error => console.log(error),
+        { enableHighAccuracy: true },
       );
 
-      // LIVE LOCATION TRACK
+      // 🔥 LIVE TRACKING
       watchId.current = Geolocation.watchPosition(
-        (position) => {
+        async position => {
           const latitude = position.coords.latitude;
           const longitude = position.coords.longitude;
 
-          const newLocation = { latitude, longitude };
+          // const newLocation = { latitude, longitude };
+          const snappedLocation = await snapToRoad(latitude, longitude);
+          const newLocation = snappedLocation;
+
+          // 🔥 FILTER SMALL GPS NOISE
+          if (prevLocation.current) {
+            const latDiff = Math.abs(prevLocation.current.latitude - latitude);
+            const lngDiff = Math.abs(
+              prevLocation.current.longitude - longitude,
+            );
+
+            if (latDiff < 0.00005 && lngDiff < 0.00005) {
+              return;
+            }
+          }
+
+          prevLocation.current = newLocation;
+
           setCurrentLocation(newLocation);
 
-          if (position.coords.heading !== null) setHeading(position.coords.heading);
+          // 🔥 SMOOTH MARKER
+          driverLocation
+            .timing({
+              latitude,
+              longitude,
+              duration: 800,
+              useNativeDriver: false,
+            })
+            .start();
 
-          driverLocation.timing({ latitude, longitude, duration: 1000 }).start();
+          // 🔥 SMOOTH ROTATION
+          if (position.coords.heading !== null) {
+            Animated.timing(headingAnim, {
+              toValue: position.coords.heading,
+              duration: 500,
+              useNativeDriver: false,
+            }).start();
+          }
 
-          // EMIT LOCATION TO SERVER
-          socketRef.current.emit("driver-location", { driverId, latitude, longitude });
+          // 🔥 SEND TO SERVER
+          socketRef.current.emit('driver-location', {
+            driverId,
+            latitude,
+            longitude,
+          });
 
-          // FOLLOW DRIVER
+          // 🔥 SMOOTH CAMERA FOLLOW (UBER STYLE)
           if (mapRef.current) {
-            mapRef.current.animateCamera({
-              center: newLocation,
-              zoom: 17,
-              heading: position.coords.heading || 0,
-            });
+            mapRef.current.animateCamera(
+              {
+                center: newLocation,
+                pitch: 45,
+                heading: position.coords.heading || 0,
+                zoom: 18,
+              },
+              { duration: 1000 },
+            );
           }
         },
-        (error) => console.log(error),
+        error => console.log(error),
         {
           enableHighAccuracy: true,
-          distanceFilter: 5,
-          interval: 3000,
-          fastestInterval: 2000,
-        }
+          distanceFilter: 3,
+          interval: 2000,
+          fastestInterval: 1500,
+        },
       );
     };
 
@@ -119,41 +221,61 @@ export default function DriverMap() {
       if (watchId.current) Geolocation.clearWatch(watchId.current);
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, []);
+  }, [driverId]);
 
-  // HANDLE RIDE REQUEST FROM PASSENGER
+  // 🔥 RIDE REQUEST HANDLER
   useEffect(() => {
     if (!socketRef.current) return;
+    socketRef.current.on('ride-request', data => {
+      if (data.driverId !== driverId) return;
 
-    socketRef.current.on("ride-request", (data) => {
-      // data: { passengerSocketId, latitude, longitude }
       Alert.alert(
-        "New Ride Request",
-        "Do you want to accept this ride?",
+        'New Ride Request',
+        'Do you want to accept this ride?',
         [
+          { text: 'Decline', style: 'cancel' },
           {
-            text: "Decline",
-            style: "cancel",
-          },
-          {
-            text: "Accept",
+            text: 'Accept',
             onPress: () => {
-              // ACCEPT RIDE
-              socketRef.current.emit("accept-ride", {
+              socketRef.current.emit('accept-ride', {
                 driverId,
-                phone: "9876543210",
+                phone: '9876543210',
                 passengerSocketId: data.passengerSocketId,
               });
             },
           },
         ],
-        { cancelable: true }
+        { cancelable: true },
       );
     });
 
     return () => {
-      socketRef.current.off("ride-request");
+      socketRef.current.off('ride-request');
     };
+  }, []);
+
+  useEffect(() => {
+    const loadDriverId = async () => {
+      try {
+        let storedId = await AsyncStorage.getItem('driverId');
+
+        if (!storedId) {
+          // FIRST TIME → CREATE ID
+          storedId = 'driver_' + Math.floor(Math.random() * 1000000);
+
+          await AsyncStorage.setItem('driverId', storedId);
+          console.log('New Driver ID Created:', storedId);
+        } else {
+          console.log('Existing Driver ID:', storedId);
+        }
+
+        setDriverId(storedId);
+      } catch (err) {
+        console.log('DriverId error:', err);
+      }
+    };
+
+    loadDriverId();
   }, []);
 
   return (
@@ -162,20 +284,23 @@ export default function DriverMap() {
         <MapView
           ref={mapRef}
           style={{ flex: 1 }}
-          region={{
+          initialRegion={{
             latitude: currentLocation.latitude,
             longitude: currentLocation.longitude,
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
           }}
         >
-          <Marker.Animated coordinate={driverLocation} anchor={{ x: 0.5, y: 0.5 }}>
-            <Image
-              source={require("../assets/images/autorickshaw.png")}
+          <Marker.Animated
+            coordinate={driverLocation}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <Animated.Image
+              source={require('../assets/images/autorickshaw.png')}
               style={{
                 width: 35,
                 height: 35,
-                transform: [{ rotate: `${heading}deg` }],
+                transform: [{ rotate }],
               }}
             />
           </Marker.Animated>
