@@ -10,15 +10,19 @@ import {
   Image,
   Alert,
   Animated,
+  Modal,
+  Text,
+  TouchableOpacity,
 } from 'react-native';
 
 import MapView, { Marker, AnimatedRegion } from 'react-native-maps';
 import Geolocation from 'react-native-geolocation-service';
 import io from 'socket.io-client';
+import MapViewDirections from 'react-native-maps-directions';
 
 const SOCKET = 'https://socket-server-3kjo.onrender.com';
 
-const GOOGLE_KEY = 'AIzaSyBo0Sm8o4iWEeXnjjTGDO2v6N8_7R3m2gI';
+const GOOGLE_KEY = 'AIzaSyBQs0fTyyb9p_E8pAMZeVFt1h43kOqms2A';
 
 const snapToRoad = async (lat, lng) => {
   try {
@@ -26,7 +30,7 @@ const snapToRoad = async (lat, lng) => {
 
     const res = await fetch(url);
     const data = await res.json();
-
+    console.log(data, 'response data');
     if (data.snappedPoints && data.snappedPoints.length > 0) {
       const point = data.snappedPoints[0].location;
 
@@ -49,6 +53,9 @@ export default function DriverMap() {
   const mapRef = useRef(null);
   const [driverId, setDriverId] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
+  const [rideRequest, setRideRequest] = useState(null);
+  const [showRideModal, setShowRideModal] = useState(false);
+  const [activeRide, setActiveRide] = useState(null);
 
   // 🔥 DRIVER ID
   // const driverId = useRef(
@@ -73,6 +80,17 @@ export default function DriverMap() {
     outputRange: ['0deg', '360deg'],
   });
 
+  const startRideFlow = ride => {
+    console.log('RideRequest FULL:', JSON.stringify(rideRequest, null, 2));
+    console.log(ride, '<<<< RIDEEEE');
+    setActiveRide({
+      pickup: ride.pickup,
+      drop: ride.drop,
+      passengerSocketId: ride.passengerSocketId, // ✅ ADD THIS
+      status: 'going_to_pickup',
+    });
+  };
+
   // 🔥 PREVIOUS LOCATION (FOR FILTER)
   const prevLocation = useRef(null);
 
@@ -93,6 +111,12 @@ export default function DriverMap() {
       // SOCKET CONNECT
       socketRef.current = io(SOCKET, {
         transports: ['websocket'],
+      });
+      // ✅ ADD THIS HERE
+      socketRef.current.on('ride-request', data => {
+        console.log('Incoming ride request:', data);
+        setRideRequest(data);
+        setShowRideModal(true);
       });
 
       // INITIAL LOCATION
@@ -118,9 +142,12 @@ export default function DriverMap() {
           // DRIVER ONLINE
           socketRef.current.emit('driver-online', {
             driverId,
+            name: 'Dhilip', // 🔥 dynamic later
+            phone: '8870847064',
+            vehicleNumber: 'TN 41 BD 6201',
+            photo: 'https://i.pravatar.cc/150?img=12',
             latitude,
             longitude,
-            phone: '9876543210',
           });
 
           // MAP CENTER
@@ -188,6 +215,10 @@ export default function DriverMap() {
           // 🔥 SEND TO SERVER
           socketRef.current.emit('driver-location', {
             driverId,
+            name: 'Dhilip',
+            phone: '8870847064',
+            vehicleNumber: 'TN 41 BD 6201',
+            photo: 'https://i.pravatar.cc/150?img=12',
             latitude,
             longitude,
           });
@@ -223,37 +254,6 @@ export default function DriverMap() {
     };
   }, [driverId]);
 
-  // 🔥 RIDE REQUEST HANDLER
-  useEffect(() => {
-    if (!socketRef.current) return;
-    socketRef.current.on('ride-request', data => {
-      if (data.driverId !== driverId) return;
-
-      Alert.alert(
-        'New Ride Request',
-        'Do you want to accept this ride?',
-        [
-          { text: 'Decline', style: 'cancel' },
-          {
-            text: 'Accept',
-            onPress: () => {
-              socketRef.current.emit('accept-ride', {
-                driverId,
-                phone: '9876543210',
-                passengerSocketId: data.passengerSocketId,
-              });
-            },
-          },
-        ],
-        { cancelable: true },
-      );
-    });
-
-    return () => {
-      socketRef.current.off('ride-request');
-    };
-  }, []);
-
   useEffect(() => {
     const loadDriverId = async () => {
       try {
@@ -278,6 +278,13 @@ export default function DriverMap() {
     loadDriverId();
   }, []);
 
+  useEffect(() => {
+    if (activeRide?.status === 'trip_completed') {
+      setTimeout(() => {
+        setActiveRide(null);
+      }, 2000); // optional delay
+    }
+  }, [activeRide]);
   return (
     <View style={{ flex: 1 }}>
       {currentLocation && (
@@ -304,8 +311,179 @@ export default function DriverMap() {
               }}
             />
           </Marker.Animated>
+          {activeRide &&
+            activeRide.pickup &&
+            activeRide.drop &&
+            currentLocation && (
+              <MapViewDirections
+                origin={currentLocation}
+                destination={
+                  activeRide.status === 'going_to_pickup'
+                    ? activeRide.pickup
+                    : activeRide.drop
+                }
+                apikey={GOOGLE_KEY}
+                strokeWidth={5}
+                strokeColor="blue"
+              />
+            )}
+          {activeRide && activeRide.status === 'going_to_pickup' && (
+            <TouchableOpacity
+              style={{
+                position: 'absolute',
+                bottom: 40,
+                alignSelf: 'center',
+                backgroundColor: 'green',
+                padding: 12,
+                borderRadius: 10,
+              }}
+              onPress={() => {
+                if (!activeRide?.passengerSocketId) return;
+
+                setActiveRide({
+                  ...activeRide,
+                  status: 'trip_started',
+                });
+
+                socketRef.current.emit('ride-status', {
+                  passengerSocketId: activeRide.passengerSocketId, // ✅ FIXED
+                  status: 'trip_started',
+                });
+              }}
+            >
+              <Text style={{ color: 'white' }}>Reached Pickup</Text>
+            </TouchableOpacity>
+          )}
+          {activeRide && activeRide.status === 'trip_started' && (
+            <TouchableOpacity
+              style={{
+                position: 'absolute',
+                bottom: 40,
+                alignSelf: 'center',
+                backgroundColor: 'black',
+                padding: 12,
+                borderRadius: 10,
+              }}
+              onPress={() => {
+                if (!activeRide?.passengerSocketId) return;
+
+                setActiveRide({
+                  ...activeRide,
+                  status: 'trip_completed',
+                });
+
+                socketRef.current.emit('ride-status', {
+                  passengerSocketId: activeRide.passengerSocketId, // ✅ FIXED
+                  status: 'trip_completed',
+                });
+              }}
+            >
+              <Text style={{ color: 'white' }}>End Trip</Text>
+            </TouchableOpacity>
+          )}
         </MapView>
       )}
+
+      <Modal visible={showRideModal} transparent animationType="slide">
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <View
+            style={{
+              width: '85%',
+              backgroundColor: 'white',
+              borderRadius: 15,
+              padding: 20,
+            }}
+          >
+            <Text style={{ fontSize: 18, fontWeight: 'bold' }}>
+              🚕 New Ride Request
+            </Text>
+
+            <Text style={{ marginTop: 10 }}>
+              Pickup: {rideRequest?.pickup?.latitude?.toFixed(4)},{' '}
+              {rideRequest?.pickup?.longitude?.toFixed(4)}
+            </Text>
+
+            <Text style={{ marginTop: 5 }}>
+              Drop: {rideRequest?.drop?.latitude?.toFixed(4)},{' '}
+              {rideRequest?.drop?.longitude?.toFixed(4)}
+            </Text>
+
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                marginTop: 20,
+              }}
+            >
+              <TouchableOpacity
+                style={{
+                  backgroundColor: 'red',
+                  padding: 10,
+                  borderRadius: 10,
+                }}
+                onPress={() => setShowRideModal(false)}
+              >
+                <Text style={{ color: 'white' }}>Decline</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  backgroundColor: 'green',
+                  padding: 10,
+                  borderRadius: 10,
+                }}
+                onPress={() => {
+                  if (
+                    !rideRequest ||
+                    !rideRequest.passengerSocketId ||
+                    !rideRequest.pickup ||
+                    !rideRequest.drop
+                  ) {
+                    console.log('Invalid rideRequest', rideRequest);
+                    return;
+                  }
+
+                  socketRef.current.emit('accept-ride', {
+                    driverId,
+                    phone: '8870847064',
+                    passengerSocketId: rideRequest.passengerSocketId,
+                    latitude: currentLocation?.latitude,
+                    longitude: currentLocation?.longitude,
+                  });
+                  const formattedRide = {
+                    ...rideRequest,
+                    pickup: {
+                      latitude: rideRequest.pickup.lat,
+                      longitude: rideRequest.pickup.lng,
+                    },
+                    drop: {
+                      latitude: rideRequest.drop.lat,
+                      longitude: rideRequest.drop.lng,
+                    },
+                  };
+                  startRideFlow(formattedRide);
+                  setRideRequest(null);
+                  setShowRideModal(false);
+                }}
+              >
+                <Text style={{ color: 'white' }}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        {rideRequest && (
+          <>
+            <Text>Pickup: {rideRequest.pickup?.latitude?.toFixed(4)}, ...</Text>
+          </>
+        )}
+      </Modal>
     </View>
   );
 }
