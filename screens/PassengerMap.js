@@ -48,6 +48,7 @@ export default function PassengerMap() {
   const [activeRide, setActiveRide] = useState(null);
   const [pickupText, setPickupText] = useState('');
   const [dropText, setDropText] = useState('');
+  const [isSelectingPlace, setIsSelectingPlace] = useState(false);
   // 🔥 MULTI DRIVER MARKERS
   const driverMarkers = useRef({});
   const pickupRef = useRef();
@@ -352,7 +353,10 @@ export default function PassengerMap() {
                     },
                   }}
                   enablePoweredByContainer={false}
-                  keyboardShouldPersistTaps="handled"
+                  keyboardShouldPersistTaps="always"
+                  listViewDisplayed="auto"
+                  minLength={2}
+                  debounce={200}
                 />
 
                 {/* ❌ CLEAR BUTTON */}
@@ -406,9 +410,14 @@ export default function PassengerMap() {
                   textInputProps={{
                     value: dropText,
                     onChangeText: setDropText,
-                    placeholderTextColor: '#888',
+                    onFocus: () => setIsSelectingPlace(true), // 🔥
+                    onBlur: () => setIsSelectingPlace(false), // 🔥
                   }}
                   onPress={(data, details = null) => {
+                    if (!details) return; // 🔥 MUST
+
+                    setIsSelectingPlace(false); // 🔥
+
                     const location = {
                       latitude: details.geometry.location.lat,
                       longitude: details.geometry.location.lng,
@@ -416,6 +425,12 @@ export default function PassengerMap() {
 
                     setDropLocation(location);
                     setDropText(data.description);
+
+                    mapRef.current?.animateToRegion({
+                      ...location,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    });
                   }}
                   query={{
                     key: GOOGLE_KEY,
@@ -425,7 +440,7 @@ export default function PassengerMap() {
                   styles={{
                     container: {
                       flex: 0,
-                      zIndex: 1000,
+                      zIndex: 999,
                     },
                     textInput: {
                       height: 45,
@@ -447,7 +462,10 @@ export default function PassengerMap() {
                     },
                   }}
                   enablePoweredByContainer={false}
-                  keyboardShouldPersistTaps="handled"
+                  keyboardShouldPersistTaps="always"
+                  listViewDisplayed="auto"
+                  minLength={2}
+                  debounce={200}
                 />
 
                 {/* ❌ CLEAR BUTTON */}
@@ -489,7 +507,27 @@ export default function PassengerMap() {
           latitudeDelta: 0.01,
           longitudeDelta: 0.01,
         }}
-        onPress={e => setDropLocation(e.nativeEvent.coordinate)}
+        onPress={(data, details = null) => {
+          if (!details) return;
+
+          setIsSelectingPlace(true); // block temporarily
+
+          const location = {
+            latitude: details.geometry.location.lat,
+            longitude: details.geometry.location.lng,
+          };
+
+          setDropLocation(location);
+          setDropText(data.description);
+
+          setTimeout(() => setIsSelectingPlace(false), 500); // 🔥 unlock
+
+          mapRef.current?.animateToRegion({
+            ...location,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          });
+        }}
       >
         {/* 🧍 PASSENGER */}
         {passengerLocation && (
