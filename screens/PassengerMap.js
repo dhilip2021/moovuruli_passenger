@@ -49,6 +49,7 @@ export default function PassengerMap() {
   const [pickupText, setPickupText] = useState('');
   const [dropText, setDropText] = useState('');
   const [isSelectingPlace, setIsSelectingPlace] = useState(false);
+  const [activeInput, setActiveInput] = useState(null);
   // 🔥 MULTI DRIVER MARKERS
   const driverMarkers = useRef({});
   const pickupRef = useRef();
@@ -303,6 +304,9 @@ export default function PassengerMap() {
                   ref={pickupRef}
                   placeholder="Pickup location"
                   fetchDetails
+                  currentLocation={true} // 🔥 முக்கியம்
+                  currentLocationLabel="Use Current Location 📍" // 🔥 label
+                  nearbyPlacesAPI="GooglePlacesSearch" // 🔥 required
                   textInputProps={{
                     value: pickupText,
                     onChangeText: setPickupText,
@@ -354,11 +358,12 @@ export default function PassengerMap() {
                   }}
                   enablePoweredByContainer={false}
                   keyboardShouldPersistTaps="always"
-                  listViewDisplayed="auto"
+                  // listViewDisplayed="auto"
                   minLength={2}
                   debounce={200}
+                  onFocus={() => setActiveInput('pickup')}
+                  listViewDisplayed={activeInput === 'pickup'}
                 />
-
                 {/* ❌ CLEAR BUTTON */}
                 {pickupText !== '' && (
                   <TouchableOpacity
@@ -463,7 +468,9 @@ export default function PassengerMap() {
                   }}
                   enablePoweredByContainer={false}
                   keyboardShouldPersistTaps="always"
-                  listViewDisplayed="auto"
+                  // listViewDisplayed="auto"
+                  onFocus={() => setActiveInput('drop')}
+                  listViewDisplayed={activeInput === 'drop'}
                   minLength={2}
                   debounce={200}
                 />
@@ -548,7 +555,7 @@ export default function PassengerMap() {
                 },
               );
             }}
-            pinColor="blue"
+            pinColor="#2ecc71"
           />
         )}
 
@@ -571,7 +578,7 @@ export default function PassengerMap() {
                 },
               );
             }}
-            pinColor="red"
+            pinColor="#e74c3c"
           />
         )}
 
