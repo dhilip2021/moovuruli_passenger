@@ -32,7 +32,20 @@ const showToast = (message, type) => {
     position: 'top',
   });
 };
+const getDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
 export default function PassengerMap() {
   const socketRef = useRef(null);
   const mapRef = useRef(null);
@@ -50,6 +63,7 @@ export default function PassengerMap() {
   const [dropText, setDropText] = useState('');
   const [isSelectingPlace, setIsSelectingPlace] = useState(false);
   const [activeInput, setActiveInput] = useState(null);
+  const [selectedDriver, setSelectedDriver] = useState(null);
   // 🔥 MULTI DRIVER MARKERS
   const driverMarkers = useRef({});
   const pickupRef = useRef();
@@ -698,7 +712,7 @@ export default function PassengerMap() {
         <View
           style={{
             position: 'absolute',
-            top: 60,
+            bottom: 90,
             alignSelf: 'center',
             backgroundColor: 'white',
             padding: 12,
@@ -739,17 +753,33 @@ export default function PassengerMap() {
               padding: 15,
             }}
           >
-            <Text
-              style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}
-            >
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 2 }}>
               Available Drivers
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: '#d1d1d1',
+                fontWeight: 'bold',
+                marginBottom: 10,
+              }}
+            >
+              select your driver
             </Text>
 
             {drivers.length === 0 ? (
               <Text>No drivers available</Text>
             ) : (
               drivers.map(driver => {
-                const fare = distance ? (40 + distance * 12).toFixed(0) : 0;
+                const driverDistance =
+                  passengerLocation &&
+                  getDistance(
+                    passengerLocation.latitude,
+                    passengerLocation.longitude,
+                    Number(driver.latitude),
+                    Number(driver.longitude),
+                  );
+                const fare = driverDistance ? (40 + driverDistance * 12).toFixed(0) : 0;
 
                 return (
                   <TouchableOpacity
@@ -760,10 +790,17 @@ export default function PassengerMap() {
                       padding: 12,
                       borderBottomWidth: 1,
                       borderColor: '#eee',
+                      backgroundColor:
+                        selectedDriver === driver.driverId
+                          ? '#e6f7ff'
+                          : 'white', // 🔥 highlight
                     }}
+                    // onPress={() => {
+                    //   requestRide(driver.driverId);
+                    //   setShowDriversModal(false);
+                    // }}
                     onPress={() => {
-                      requestRide(driver.driverId);
-                      setShowDriversModal(false);
+                      setSelectedDriver(driver.driverId);
                     }}
                   >
                     {/* 👤 DRIVER IMAGE */}
@@ -788,9 +825,18 @@ export default function PassengerMap() {
                       </Text>
 
                       <Text style={{ color: '#666' }}>
-                        🚕 {driver.vehicleNumber || 'TN XX XXXX'}
+                        {driver.vehicleNumber || 'TN XX XXXX'}
                       </Text>
-
+                      {/* {distance && (
+                        <Text style={{ fontSize: 12, color: '#999' }}>
+                          📍 {distance.toFixed(2)} km away
+                        </Text>
+                      )} */}
+                      {driverDistance && (
+                        <Text style={{ fontSize: 12, color: '#999' }}>
+                          📍 {driverDistance.toFixed(2)} km away
+                        </Text>
+                      )}
                       {/* <Text style={{ fontSize: 12, color: '#999' }}>
           📞 {driver.phone}
         </Text> */}
@@ -804,8 +850,95 @@ export default function PassengerMap() {
                 );
               })
             )}
+            <View style={{ marginTop: 15 }}>
+              {/* ✅ CONFIRM BUTTON */}
+              <TouchableOpacity
+                disabled={!selectedDriver}
+                style={{
+                  backgroundColor: selectedDriver ? '#111' : '#ccc',
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  marginBottom: 10,
 
-            <Button title="Close" onPress={() => setShowDriversModal(false)} />
+                  // 🔥 Shadow (iOS)
+                  shadowColor: '#000',
+                  shadowOpacity: 0.2,
+                  shadowRadius: 5,
+                  shadowOffset: { width: 0, height: 3 },
+
+                  // 🔥 Elevation (Android)
+                  elevation: 5,
+                }}
+                onPress={() => {
+                  if (!selectedDriver) return;
+
+                  requestRide(selectedDriver);
+                  setShowDriversModal(false);
+                  setSelectedDriver(null);
+                }}
+              >
+                <Text
+                  style={{
+                    color: 'white',
+                    fontWeight: '600',
+                    fontSize: 16,
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Confirm Ride
+                </Text>
+              </TouchableOpacity>
+
+              {/* ❌ CLOSE BUTTON */}
+              <TouchableOpacity
+                style={{
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  backgroundColor: '#fafafa',
+                }}
+                onPress={() => setShowDriversModal(false)}
+              >
+                <Text
+                  style={{
+                    color: '#333',
+                    fontWeight: '500',
+                    fontSize: 15,
+                  }}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {/* {selectedDriver && (
+              <TouchableOpacity
+                disabled={!selectedDriver} // 🔥 disable if not selected
+                style={{
+                  marginTop: 15,
+                  backgroundColor: '#000',
+                  padding: 12,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  opacity: selectedDriver ? 1 : 0.5, // 🔥 dim effect
+                }}
+                onPress={() => {
+                  if (!selectedDriver) return;
+
+                  requestRide(selectedDriver);
+                  setShowDriversModal(false);
+                  setSelectedDriver(null);
+                }}
+              >
+                <Text style={{ color: 'white', fontWeight: 'bold' }}>
+                  Confirm Ride 🚕
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            <Button title="Close" onPress={() => setShowDriversModal(false)} /> */}
           </View>
         </View>
       </Modal>
