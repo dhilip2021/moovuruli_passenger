@@ -2,6 +2,8 @@
 /* eslint-disable react-native/no-inline-styles */
 
 import React, { useEffect, useState, useRef } from 'react';
+import LinearGradient from 'react-native-linear-gradient';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
@@ -15,6 +17,7 @@ import {
   TouchableOpacity,
   TextInput,
 } from 'react-native';
+
 
 import MapView, { Marker, AnimatedRegion } from 'react-native-maps';
 import Geolocation from 'react-native-geolocation-service';
@@ -84,6 +87,7 @@ export default function DriverMap() {
   const [enteredOtp, setEnteredOtp] = useState('');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMode, setPaymentMode] = useState(null);
+const [isOnline, setIsOnline] = useState(true);
 
   // 🔥 DRIVER ID
   // const driverId = useRef(
@@ -107,6 +111,17 @@ export default function DriverMap() {
     inputRange: [0, 360],
     outputRange: ['0deg', '360deg'],
   });
+
+
+const toggleOnlineStatus = () => {
+  const newStatus = !isOnline;
+  setIsOnline(newStatus);
+
+  socketRef.emit('driver-status', {
+    driverId,
+    isOnline: newStatus,
+  });
+};
 
   const startRideFlow = ride => {
     if (!ride?.pickup || !ride?.drop) {
@@ -403,6 +418,54 @@ export default function DriverMap() {
 
   return (
     <View style={{ flex: 1 }}>
+    {/* <TouchableOpacity
+  activeOpacity={0.85}
+  onPress={toggleOnlineStatus}
+  style={{
+    marginTop: 10,
+    borderRadius: 30,
+    overflow: 'hidden',
+    elevation: 6,
+  }}
+>
+  <LinearGradient
+    colors={
+      isOnline
+        ? ['#ff4d4f', '#d9363e'] 
+        : ['#34c759', '#28a745'] 
+    }
+    start={{ x: 0, y: 0 }}
+    end={{ x: 1, y: 1 }}
+    style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      borderRadius: 30,
+    }}
+  >
+ 
+    <Ionicons
+      name={isOnline ? 'power' : 'checkmark-circle'}
+      size={18}
+      color="#fff"
+      style={{ marginRight: 8 }}
+    />
+
+    <Text
+      style={{
+        color: '#fff',
+        fontSize: 15,
+        fontWeight: '600',
+        letterSpacing: 0.5,
+      }}
+    >
+      {isOnline ? 'Go Offline' : 'Go Online'}
+    </Text>
+  </LinearGradient>
+</TouchableOpacity> */}
+
       {currentLocation && (
         <MapView
           ref={mapRef}
@@ -617,223 +680,224 @@ export default function DriverMap() {
       )}
 
       <Modal visible={showRideModal} transparent animationType="fade">
-  <View
-    style={{
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.6)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    }}
-  >
-    <View
-      style={{
-        width: '88%',
-        backgroundColor: '#fff',
-        borderRadius: 20,
-        padding: 20,
-        elevation: 12,
-      }}
-    >
-      {/* HEADER */}
-      <Text
-        style={{
-          fontSize: 20,
-          fontWeight: '700',
-          textAlign: 'center',
-          marginBottom: 15,
-        }}
-      >
-         New Ride Request
-      </Text>
-
-      {/* LOCATION CARD */}
-     <View
-  style={{
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 15,
-
-    // Shadow (iOS)
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-
-    // Elevation (Android)
-    elevation: 6,
-  }}
->
-  {/* 🔹 PICKUP */}
-  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-    {/* ICON */}
-    <View
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: '#2ecc71',
-        marginRight: 10,
-      }}
-    />
-
-    {/* TEXT */}
-    <Text
-      numberOfLines={1}
-      ellipsizeMode="tail"
-      style={{
-        flex: 1,
-        color: '#333',
-        fontSize: 14,
-        fontWeight: '500',
-      }}
-    >
-      {rideRequest?.pickup?.address || 'Pickup Location'}
-    </Text>
-  </View>
-
-  {/* 🔸 DIVIDER */}
-  <View
-    style={{
-      height: 1,
-      backgroundColor: '#f0f0f0',
-      marginVertical: 12,
-      marginLeft: 20,
-    }}
-  />
-
-  {/* 🔹 DROP */}
-  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-    {/* ICON */}
-    <View
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-        backgroundColor: '#e74c3c',
-        marginRight: 10,
-      }}
-    />
-
-    {/* TEXT */}
-    <Text
-      numberOfLines={1}
-      ellipsizeMode="tail"
-      style={{
-        flex: 1,
-        color: '#333',
-        fontSize: 14,
-        fontWeight: '500',
-      }}
-    >
-      {rideRequest?.drop?.address || 'Drop Location'}
-    </Text>
-  </View>
-</View>
-
-      {/* FARE CARD */}
-      <View
-        style={{
-          backgroundColor: '#E8F5E9',
-          borderRadius: 12,
-          padding: 12,
-          marginBottom: 20,
-          alignItems: 'center',
-        }}
-      >
-        <Text style={{ color: '#2e7d32', fontSize: 13 }}>
-          Estimated Fare
-        </Text>
-
-        <Text
-          style={{
-            fontSize: 22,
-            fontWeight: 'bold',
-            color: '#2e7d32',
-            marginTop: 5,
-          }}
-        >
-          ₹{fare.toFixed(0)}
-        </Text>
-      </View>
-
-      {/* BUTTONS */}
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-        }}
-      >
-        {/* DECLINE */}
-        <TouchableOpacity
+        <View
           style={{
             flex: 1,
-            backgroundColor: '#fff',
-            paddingVertical: 12,
-            borderRadius: 12,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            justifyContent: 'center',
             alignItems: 'center',
-            borderWidth: 1,
-            borderColor: '#e74c3c',
-            marginRight: 8,
-          }}
-          onPress={() => {
-            socketRef.current.emit('decline-ride', {
-              passengerSocketId: rideRequest.passengerSocketId,
-            });
-            setShowRideModal(false);
           }}
         >
-          <Text
+          <View
             style={{
-              color: '#e74c3c',
-              fontWeight: '600',
+              width: '88%',
+              backgroundColor: '#fff',
+              borderRadius: 20,
+              padding: 20,
+              elevation: 12,
             }}
           >
-            Decline
-          </Text>
-        </TouchableOpacity>
+            {/* HEADER */}
+            <Text
+              style={{
+                fontSize: 20,
+                fontWeight: '700',
+                textAlign: 'center',
+                marginBottom: 15,
+              }}
+            >
+              New Ride Request
+            </Text>
 
-        {/* ACCEPT */}
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            backgroundColor: '#419952',
-            paddingVertical: 12,
-            borderRadius: 12,
-            alignItems: 'center',
-            elevation: 4,
-          }}
-          onPress={() => {
-            socketRef.current.emit('accept-ride', {
-              driverId,
-              phone: '8870847064',
-              passengerSocketId: rideRequest.passengerSocketId,
-              latitude: currentLocation?.latitude,
-              longitude: currentLocation?.longitude,
-            });
+            {/* LOCATION CARD */}
+            <View
+              style={{
+                backgroundColor: '#ffffff',
+                borderRadius: 18,
+                padding: 16,
+                marginBottom: 15,
 
-            startRideFlow({
-              ...rideRequest,
-              fare: rideRequest.fare,
-            });
+                // Shadow (iOS)
+                shadowColor: '#000',
+                shadowOpacity: 0.08,
+                shadowRadius: 10,
+                shadowOffset: { width: 0, height: 4 },
 
-            setRideRequest(null);
-            setShowRideModal(false);
-          }}
-        >
-          <Text
-            style={{
-              color: '#fff',
-              fontWeight: '600',
-            }}
-          >
-            Accept Ride
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  </View>
-</Modal>
+                // Elevation (Android)
+                elevation: 6,
+              }}
+            >
+              {/* 🔹 PICKUP */}
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {/* ICON */}
+                <View
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: '#2ecc71',
+                    marginRight: 10,
+                  }}
+                />
+
+                {/* TEXT */}
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  style={{
+                    flex: 1,
+                    color: '#333',
+                    fontSize: 14,
+                    fontWeight: '500',
+                  }}
+                >
+                  {rideRequest?.pickup?.address || 'Pickup Location'}
+                </Text>
+              </View>
+
+              {/* 🔸 DIVIDER */}
+              <View
+                style={{
+                  height: 1,
+                  backgroundColor: '#f0f0f0',
+                  marginVertical: 12,
+                  marginLeft: 20,
+                }}
+              />
+
+              {/* 🔹 DROP */}
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {/* ICON */}
+                <View
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: '#e74c3c',
+                    marginRight: 10,
+                  }}
+                />
+
+                {/* TEXT */}
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  style={{
+                    flex: 1,
+                    color: '#333',
+                    fontSize: 14,
+                    fontWeight: '500',
+                  }}
+                >
+                  {rideRequest?.drop?.address || 'Drop Location'}
+                </Text>
+              </View>
+            </View>
+
+            {/* FARE CARD */}
+            <View
+              style={{
+                backgroundColor: '#E8F5E9',
+                borderRadius: 12,
+                padding: 12,
+                marginBottom: 20,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#2e7d32', fontSize: 13 }}>
+                Estimated Fare
+              </Text>
+
+              <Text
+                style={{
+                  fontSize: 22,
+                  fontWeight: 'bold',
+                  color: '#2e7d32',
+                  marginTop: 5,
+                }}
+              >
+                ₹{fare.toFixed(0)}
+              </Text>
+            </View>
+
+            {/* BUTTONS */}
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+              }}
+            >
+              {/* DECLINE */}
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#fff',
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#e74c3c',
+                  marginRight: 8,
+                }}
+                onPress={() => {
+                  socketRef.current.emit('decline-ride', {
+                    driverId: driverId,
+                    passengerSocketId: rideRequest.passengerSocketId,
+                  });
+                  setShowRideModal(false);
+                }}
+              >
+                <Text
+                  style={{
+                    color: '#e74c3c',
+                    fontWeight: '600',
+                  }}
+                >
+                  Decline
+                </Text>
+              </TouchableOpacity>
+
+              {/* ACCEPT */}
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#419952',
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  elevation: 4,
+                }}
+                onPress={() => {
+                  socketRef.current.emit('accept-ride', {
+                    driverId,
+                    phone: '8870847064',
+                    passengerSocketId: rideRequest.passengerSocketId,
+                    latitude: currentLocation?.latitude,
+                    longitude: currentLocation?.longitude,
+                  });
+
+                  startRideFlow({
+                    ...rideRequest,
+                    fare: rideRequest.fare,
+                  });
+
+                  setRideRequest(null);
+                  setShowRideModal(false);
+                }}
+              >
+                <Text
+                  style={{
+                    color: '#fff',
+                    fontWeight: '600',
+                  }}
+                >
+                  Accept Ride
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <Modal visible={showPaymentModal} transparent animationType="slide">
         <View
           style={{

@@ -65,6 +65,8 @@ export default function PassengerMap() {
   const [activeInput, setActiveInput] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [declinedDrivers, setDeclinedDrivers] = useState([]);
+  const [errorModal, setErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   // 🔥 MULTI DRIVER MARKERS
   const driverMarkers = useRef({});
   const pickupRef = useRef();
@@ -209,7 +211,9 @@ export default function PassengerMap() {
       // 🚕 DRIVERS LIST (SINGLE CLEAN LISTENER)
       socketRef.current.on('drivers-list', list => {
         console.log(list, '<<< driver listtt');
-        setDrivers(list);
+        // setDrivers(list);
+        const onlineDrivers = list.filter(driver => driver.isOnline !== false);
+        setDrivers(onlineDrivers);
 
         list.forEach(driver => {
           const id = driver.driverId;
@@ -352,6 +356,16 @@ export default function PassengerMap() {
 
     return () => clearTimeout(timeout);
   }, [passengerLocation]);
+
+  useEffect(() => {
+    const onlineIds = drivers.map(d => d.driverId);
+
+    Object.keys(driverMarkers.current).forEach(id => {
+      if (!onlineIds.includes(id)) {
+        delete driverMarkers.current[id];
+      }
+    });
+  }, [drivers]);
 
   const fare = distance ? 40 + distance * 12 : 0;
 
@@ -722,8 +736,30 @@ export default function PassengerMap() {
               apikey={GOOGLE_KEY}
               strokeWidth={6}
               strokeColor="#2E86FF"
+              // onReady={result => {
+              //   setDistance(result.distance);
+              //   setDuration(result.duration);
+              // }}
               onReady={result => {
-                setDistance(result.distance);
+                const dist = result.distance;
+
+                if (dist > 20) {
+                  // 🔥 SET ERROR MODAL
+                  setErrorMessage('Maximum ride distance is 20 km only 🚫');
+                  setErrorModal(true);
+
+                  // 🔥 CLEAR DROP
+                  setDropLocation(null);
+                  setDropText('');
+                  dropRef.current?.setAddressText('');
+
+                  setDistance(null);
+                  setDuration(null);
+
+                  return;
+                }
+
+                setDistance(dist);
                 setDuration(result.duration);
               }}
             />
@@ -919,7 +955,7 @@ export default function PassengerMap() {
 
                       {/* 💰 FARE */}
                       <Text style={{ fontWeight: 'bold', fontSize: 16 }}>
-                        ₹{fare.toFixed(0)} 
+                        ₹{fare.toFixed(0)}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -991,6 +1027,67 @@ export default function PassengerMap() {
           </View>
         </View>
       </Modal>
+<Modal visible={errorModal} transparent animationType="fade">
+  <View
+    style={{
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    }}
+  >
+    <View
+      style={{
+        width: '80%',
+        backgroundColor: '#fff',
+        borderRadius: 18,
+        padding: 20,
+        alignItems: 'center',
+        elevation: 10,
+      }}
+    >
+      {/* ICON */}
+      <Ionicons name="alert-circle" size={50} color="#e74c3c" />
+
+      {/* TITLE */}
+      <Text
+        style={{
+          fontSize: 18,
+          fontWeight: 'bold',
+          marginTop: 10,
+          color: '#333',
+        }}
+      >
+        Oops!
+      </Text>
+
+      {/* MESSAGE */}
+      <Text
+        style={{
+          textAlign: 'center',
+          marginTop: 8,
+          color: '#666',
+        }}
+      >
+        {errorMessage}
+      </Text>
+
+      {/* BUTTON */}
+      <TouchableOpacity
+        onPress={() => setErrorModal(false)}
+        style={{
+          marginTop: 15,
+          backgroundColor: '#e74c3c',
+          paddingVertical: 10,
+          paddingHorizontal: 25,
+          borderRadius: 10,
+        }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '600' }}>OK</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
       {activeRide?.status === 'driver_on_the_way' && (
         <View
           style={{
