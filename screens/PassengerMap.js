@@ -64,6 +64,7 @@ export default function PassengerMap() {
   const [isSelectingPlace, setIsSelectingPlace] = useState(false);
   const [activeInput, setActiveInput] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(null);
+  const [declinedDrivers, setDeclinedDrivers] = useState([]);
   // 🔥 MULTI DRIVER MARKERS
   const driverMarkers = useRef({});
   const pickupRef = useRef();
@@ -86,19 +87,9 @@ export default function PassengerMap() {
     }
   };
 
-  // 🔥 REMOVE OFFLINE DRIVERS
-  useEffect(() => {
-    const currentIds = drivers.map(d => d.driverId);
-
-    Object.keys(driverMarkers.current).forEach(id => {
-      if (!currentIds.includes(id)) {
-        delete driverMarkers.current[id];
-      }
-    });
-  }, [drivers]);
-
   // 🚕 REQUEST RIDE
   const requestRide = driverId => {
+    setDeclinedDrivers([]);
     if (!passengerLocation) {
       showToast('Pickup location not detected 📍', 'error');
       return;
@@ -116,12 +107,21 @@ export default function PassengerMap() {
 
     socketRef.current.emit('request-ride', {
       passengerSocketId: socketRef.current.id,
-      pickup: passengerLocation,
-      drop: dropLocation,
+      pickup: {
+        latitude: passengerLocation.latitude,
+        longitude: passengerLocation.longitude,
+        address: pickupText,
+      },
+      drop: {
+        latitude: dropLocation.latitude,
+        longitude: dropLocation.longitude,
+        address: dropText,
+      },
       driverId,
+      fare: fare,
     });
 
-    showToast('Ride request sent 🚕', 'success');
+    showToast('Request sent... waiting for driver ⏳', 'info');
   };
   // 🚕 CANCEL RIDE
   const cancelRide = () => {
@@ -139,9 +139,9 @@ export default function PassengerMap() {
   };
 
   useEffect(() => {
+    console.log('ACTIVE RIDE:', activeRide);
     if (activeRide?.status === 'trip_completed') {
       showToast('Ride Completed 🎉', 'success');
-
       setTimeout(() => {
         setActiveRide(null);
         setDriverPhone(null);
@@ -239,27 +239,37 @@ export default function PassengerMap() {
       });
 
       // 📞 RIDE ACCEPTED
+
       socketRef.current.on('ride-accepted', data => {
+        console.log(data, '<< ride-accepted data');
         setDriverPhone(data.phone);
+
         setActiveRide({
           driverId: data.driverId,
-          status: 'driver_on_the_way',
-          driverLocation: null,
+          status: data.status, // ✅ FIX
+          driverLocation: data.driverLocation,
+          otp: data.otp,
         });
 
-        showToast('Driver is on the way 🚕', 'success');
+        // ✅ CLOSE MODAL HERE
+        setShowDriversModal(false);
+        setSelectedDriver(null);
+
+        showToast('Driver accepted', 'success');
       });
 
       socketRef.current.on('driver-location', data => {
-        if (!activeRide || data.driverId !== activeRide.driverId) return;
+        setActiveRide(prev => {
+          if (!prev || data.driverId !== prev.driverId) return prev;
 
-        setActiveRide(prev => ({
-          ...prev,
-          driverLocation: {
-            latitude: data.latitude,
-            longitude: data.longitude,
-          },
-        }));
+          return {
+            ...prev,
+            driverLocation: {
+              latitude: data.latitude,
+              longitude: data.longitude,
+            },
+          };
+        });
       });
       socketRef.current.on('ride-cancelled', () => {
         setActiveRide(null);
@@ -267,6 +277,48 @@ export default function PassengerMap() {
       });
       socketRef.current.on('ride-cancelled-success', () => {
         showToast('Ride cancelled successfully ✅', 'success');
+      });
+      socketRef.current.on('ride-declined', data => {
+        showToast('Driver declined ❌ Try another driver', 'error');
+
+        if (data?.driverId) {
+          setDeclinedDrivers(prev => [...prev, data.driverId]);
+        }
+      });
+      socketRef.current.on('trip_started', () => {
+        setActiveRide(prev => ({
+          ...prev,
+          status: 'trip_started',
+        }));
+
+        showToast('Trip Started 🚀', 'success');
+      });
+
+      socketRef.current.on('trip-ended', () => {
+        setActiveRide(prev => ({
+          ...prev,
+          status: 'trip_completed',
+        }));
+
+        showToast('Trip Completed 🎉', 'success');
+
+        // reset after 3 sec
+        setTimeout(() => {
+          setActiveRide(null);
+          setDriverPhone(null);
+          setDropLocation(null);
+        }, 3000);
+      });
+
+      socketRef.current.on('ride-status-update', data => {
+        setActiveRide(prev => {
+          if (!prev || prev.driverId !== data.driverId) return prev;
+
+          return {
+            ...prev,
+            status: data.status,
+          };
+        });
       });
     };
 
@@ -278,7 +330,29 @@ export default function PassengerMap() {
     };
   }, []);
 
-  console.log(distance, '<<< distance');
+  // 🔥 REMOVE OFFLINE DRIVERS
+  useEffect(() => {
+    const currentIds = drivers.map(d => d.driverId);
+
+    Object.keys(driverMarkers.current).forEach(id => {
+      if (!currentIds.includes(id)) {
+        delete driverMarkers.current[id];
+      }
+    });
+  }, [drivers]);
+  useEffect(() => {
+    if (!socketRef.current || !passengerLocation) return;
+
+    const timeout = setTimeout(() => {
+      socketRef.current.emit('get-nearby-drivers', {
+        latitude: passengerLocation.latitude,
+        longitude: passengerLocation.longitude,
+      });
+    }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [passengerLocation]);
+
   const fare = distance ? 40 + distance * 12 : 0;
 
   return (
@@ -310,7 +384,7 @@ export default function PassengerMap() {
           <View style={{ marginBottom: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               {/* ICON */}
-              <Ionicons name="radio-button-on" size={18} color="#2ecc71" />
+              <Ionicons name="radio-button-on" size={18} color="#419952" />
 
               {/* INPUT */}
               <View style={{ flex: 1, marginLeft: 8, position: 'relative' }}>
@@ -344,7 +418,7 @@ export default function PassengerMap() {
                   query={{
                     key: GOOGLE_KEY,
                     language: 'en',
-                    // components: 'country:in',
+                    components: 'country:in',
                   }}
                   styles={{
                     container: {
@@ -454,7 +528,7 @@ export default function PassengerMap() {
                   query={{
                     key: GOOGLE_KEY,
                     language: 'en',
-                    // components: 'country:in',
+                    components: 'country:in',
                   }}
                   styles={{
                     container: {
@@ -569,7 +643,7 @@ export default function PassengerMap() {
                 },
               );
             }}
-            pinColor="#2ecc71"
+            pinColor="#419952"
           />
         )}
 
@@ -637,7 +711,7 @@ export default function PassengerMap() {
             }
             apikey={GOOGLE_KEY}
             strokeWidth={5}
-            strokeColor="blue"
+            strokeColor="#2E86FF"
           />
         ) : (
           passengerLocation &&
@@ -646,8 +720,8 @@ export default function PassengerMap() {
               origin={passengerLocation}
               destination={dropLocation}
               apikey={GOOGLE_KEY}
-              strokeWidth={5}
-              strokeColor="black"
+              strokeWidth={6}
+              strokeColor="#2E86FF"
               onReady={result => {
                 setDistance(result.distance);
                 setDuration(result.duration);
@@ -666,7 +740,7 @@ export default function PassengerMap() {
       >
         <TouchableOpacity
           style={{
-            backgroundColor: activeRide ? 'red' : '#000',
+            backgroundColor: activeRide ? '#e74c3c' : '#419952',
             padding: 12,
             borderRadius: 10,
           }}
@@ -691,16 +765,22 @@ export default function PassengerMap() {
         <View
           style={{
             position: 'absolute',
-            bottom: 120,
+            bottom: 200,
             alignSelf: 'center',
-            backgroundColor: 'white',
-            padding: 12,
-            borderRadius: 10,
+            backgroundColor: '#fff',
+            paddingVertical: 12,
+            paddingHorizontal: 20,
+            borderRadius: 25,
+            elevation: 6,
+            flexDirection: 'row',
+            alignItems: 'center',
           }}
         >
-          <Text>
+          <Text style={{ fontWeight: '600', fontSize: 14 }}>
+            {activeRide.status === 'otp_waiting' &&
+              '🔐 Waiting for OTP verification'}
             {activeRide.status === 'driver_on_the_way' &&
-              '🚕 Driver coming to pickup'}
+              ' Driver coming to pickup'}
             {activeRide.status === 'trip_started' && '🟢 Trip started'}
             {activeRide.status === 'trip_completed' && '✅ Trip completed'}
           </Text>
@@ -770,99 +850,93 @@ export default function PassengerMap() {
             {drivers.length === 0 ? (
               <Text>No drivers available</Text>
             ) : (
-              drivers.map(driver => {
-                const driverDistance =
-                  passengerLocation &&
-                  getDistance(
-                    passengerLocation.latitude,
-                    passengerLocation.longitude,
-                    Number(driver.latitude),
-                    Number(driver.longitude),
-                  );
-                const fare = driverDistance ? (40 + driverDistance * 12).toFixed(0) : 0;
+              drivers
+                .filter(driver => !declinedDrivers.includes(driver.driverId))
+                .map(driver => {
+                  const driverDistance =
+                    passengerLocation &&
+                    getDistance(
+                      passengerLocation.latitude,
+                      passengerLocation.longitude,
+                      Number(driver.latitude),
+                      Number(driver.longitude),
+                    );
+                  // const driverFare = driverDistance ? (40 + driverDistance * 12).toFixed(0) : fare;
 
-                return (
-                  <TouchableOpacity
-                    key={driver.driverId}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      padding: 12,
-                      borderBottomWidth: 1,
-                      borderColor: '#eee',
-                      backgroundColor:
-                        selectedDriver === driver.driverId
-                          ? '#e6f7ff'
-                          : 'white', // 🔥 highlight
-                    }}
-                    // onPress={() => {
-                    //   requestRide(driver.driverId);
-                    //   setShowDriversModal(false);
-                    // }}
-                    onPress={() => {
-                      setSelectedDriver(driver.driverId);
-                    }}
-                  >
-                    {/* 👤 DRIVER IMAGE */}
-                    <Image
-                      source={{
-                        uri:
-                          driver.photo ||
-                          'https://cdn-icons-png.flaticon.com/512/149/149071.png',
-                      }}
+                  return (
+                    <TouchableOpacity
+                      key={driver.driverId}
                       style={{
-                        width: 50,
-                        height: 50,
-                        borderRadius: 25,
-                        marginRight: 10,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        padding: 12,
+                        borderBottomWidth: 1,
+                        borderColor: '#eee',
+                        backgroundColor:
+                          selectedDriver === driver.driverId
+                            ? '#e6f7ff'
+                            : 'white', // 🔥 highlight
                       }}
-                    />
+                      // onPress={() => {
+                      //   requestRide(driver.driverId);
+                      //   setShowDriversModal(false);
+                      // }}
+                      onPress={() => {
+                        setSelectedDriver(driver.driverId);
+                      }}
+                    >
+                      {/* 👤 DRIVER IMAGE */}
+                      <Image
+                        source={{
+                          uri:
+                            driver.photo ||
+                            'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+                        }}
+                        style={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: 25,
+                          marginRight: 10,
+                        }}
+                      />
 
-                    {/* 📄 DETAILS */}
-                    <View style={{ flex: 1 }}>
+                      {/* 📄 DETAILS */}
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: 'bold', fontSize: 16 }}>
+                          {driver.name || driver.driverId}
+                        </Text>
+
+                        <Text style={{ color: '#666' }}>
+                          {driver.vehicleNumber || 'TN XX XXXX'}
+                        </Text>
+
+                        {driverDistance && (
+                          <Text style={{ fontSize: 12, color: '#999' }}>
+                            📍 {driverDistance.toFixed(2)} km away
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* 💰 FARE */}
                       <Text style={{ fontWeight: 'bold', fontSize: 16 }}>
-                        {driver.name || driver.driverId}
+                        ₹{fare.toFixed(0)} 
                       </Text>
-
-                      <Text style={{ color: '#666' }}>
-                        {driver.vehicleNumber || 'TN XX XXXX'}
-                      </Text>
-                      {/* {distance && (
-                        <Text style={{ fontSize: 12, color: '#999' }}>
-                          📍 {distance.toFixed(2)} km away
-                        </Text>
-                      )} */}
-                      {driverDistance && (
-                        <Text style={{ fontSize: 12, color: '#999' }}>
-                          📍 {driverDistance.toFixed(2)} km away
-                        </Text>
-                      )}
-                      {/* <Text style={{ fontSize: 12, color: '#999' }}>
-          📞 {driver.phone}
-        </Text> */}
-                    </View>
-
-                    {/* 💰 FARE */}
-                    <Text style={{ fontWeight: 'bold', fontSize: 16 }}>
-                      ₹{fare}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })
+                    </TouchableOpacity>
+                  );
+                })
             )}
             <View style={{ marginTop: 15 }}>
               {/* ✅ CONFIRM BUTTON */}
               <TouchableOpacity
                 disabled={!selectedDriver}
                 style={{
-                  backgroundColor: selectedDriver ? '#111' : '#ccc',
-                  paddingVertical: 14,
+                  backgroundColor: selectedDriver ? '#419952' : '#ccc',
+                  paddingVertical: 10,
                   borderRadius: 12,
                   alignItems: 'center',
                   marginBottom: 10,
-
                   // 🔥 Shadow (iOS)
-                  shadowColor: '#000',
+                  shadowColor: '#419952',
                   shadowOpacity: 0.2,
                   shadowRadius: 5,
                   shadowOffset: { width: 0, height: 3 },
@@ -874,8 +948,6 @@ export default function PassengerMap() {
                   if (!selectedDriver) return;
 
                   requestRide(selectedDriver);
-                  setShowDriversModal(false);
-                  setSelectedDriver(null);
                 }}
               >
                 <Text
@@ -893,14 +965,17 @@ export default function PassengerMap() {
               {/* ❌ CLOSE BUTTON */}
               <TouchableOpacity
                 style={{
-                  paddingVertical: 12,
+                  paddingVertical: 10,
                   borderRadius: 12,
                   alignItems: 'center',
                   borderWidth: 1,
                   borderColor: '#ddd',
-                  backgroundColor: '#fafafa',
+                  backgroundColor: '#FECE26',
                 }}
-                onPress={() => setShowDriversModal(false)}
+                onPress={() => {
+                  setShowDriversModal(false);
+                  setSelectedDriver(null);
+                }}
               >
                 <Text
                   style={{
@@ -913,35 +988,38 @@ export default function PassengerMap() {
                 </Text>
               </TouchableOpacity>
             </View>
-            {/* {selectedDriver && (
-              <TouchableOpacity
-                disabled={!selectedDriver} // 🔥 disable if not selected
-                style={{
-                  marginTop: 15,
-                  backgroundColor: '#000',
-                  padding: 12,
-                  borderRadius: 10,
-                  alignItems: 'center',
-                  opacity: selectedDriver ? 1 : 0.5, // 🔥 dim effect
-                }}
-                onPress={() => {
-                  if (!selectedDriver) return;
-
-                  requestRide(selectedDriver);
-                  setShowDriversModal(false);
-                  setSelectedDriver(null);
-                }}
-              >
-                <Text style={{ color: 'white', fontWeight: 'bold' }}>
-                  Confirm Ride 🚕
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            <Button title="Close" onPress={() => setShowDriversModal(false)} /> */}
           </View>
         </View>
       </Modal>
+      {activeRide?.status === 'driver_on_the_way' && (
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 250,
+            alignSelf: 'center',
+            backgroundColor: '#fff',
+            padding: 20,
+            borderRadius: 12,
+            elevation: 10,
+            alignItems: 'center',
+          }}
+        >
+          <Text style={{ fontWeight: 'bold', fontSize: 16 }}>
+            🔐 Share this OTP with Driver
+          </Text>
+
+          <Text
+            style={{
+              fontSize: 32,
+              fontWeight: 'bold',
+              marginTop: 10,
+              color: '#419952',
+            }}
+          >
+            {activeRide?.otp}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
